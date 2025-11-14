@@ -216,6 +216,32 @@ npm run build_and_start
 
 You can now access the UI at `http://localhost:8675` or `http://<your-ip>:8675` if you are running it on a server.
 
+## R2 Sync Worker (optional)
+
+When the UI is used as part of the new GoModel trainer workflow, datasets are uploaded
+to Cloudflare R2 directly from the website. A small FastAPI service that lives in
+`r2_sync_worker/` mirrors those objects to the ai-toolkit datasets folder before jobs
+are created via `/api/jobs`.
+
+```bash
+pip install -r requirements.txt  # includes FastAPI/boto3
+AITK_R2_DATASETS_ROOT=/app/ai-toolkit/datasets/r2 \
+R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com \
+R2_REGION=auto \
+R2_ACCESS_KEY_ID=... \
+R2_SECRET_ACCESS_KEY=... \
+python -m r2_sync_worker.main
+```
+
+Endpoints:
+
+* `POST /sync-dataset` → `{ datasetId, bucket, prefix, overwrite? }`
+* `GET /dataset-status/{datasetId}`
+* `GET /healthz`
+
+The worker writes synced datasets to `/app/ai-toolkit/datasets/r2/<datasetId>` and
+leaves a `.sync_complete` marker so subsequent job submissions can skip the download.
+
 ## Securing the UI
 
 If you are hosting the UI on a cloud provider or any network that is not secure, I highly recommend securing it with an auth token. 
