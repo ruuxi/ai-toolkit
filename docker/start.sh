@@ -1,5 +1,7 @@
 #!/bin/bash
-set -e  # Exit the script if any statement returns a non-true return value
+set -euo pipefail
+
+trap "echo 'Shutting down...'; kill 0" SIGINT SIGTERM
 
 # ref https://github.com/runpod/containers/blob/main/container-template/start.sh
 
@@ -66,5 +68,22 @@ echo "Pod Started"
 
 setup_ssh
 export_env_vars
+
+echo "Starting R2 Sync Worker..."
+(
+    cd /app/ai-toolkit
+    python -m r2_sync_worker.main
+) &
+SYNC_PID=$!
+
 echo "Starting AI Toolkit UI..."
-cd /app/ai-toolkit/ui && npm run start 
+(
+    cd /app/ai-toolkit/ui
+    npm run start
+) &
+UI_PID=$!
+
+wait -n "$SYNC_PID" "$UI_PID"
+EXIT_CODE=$?
+kill 0 >/dev/null 2>&1 || true
+exit $EXIT_CODE

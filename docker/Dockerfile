@@ -72,8 +72,8 @@ RUN npm install && \
     npm run build && \
     npm run update_db
 
-# Expose port (assuming the application runs on port 3000)
-EXPOSE 8675
+# Expose UI and sync worker ports
+EXPOSE 8675 8080
 
 WORKDIR /
 
