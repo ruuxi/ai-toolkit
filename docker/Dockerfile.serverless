@@ -1,0 +1,57 @@
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
+
+LABEL maintainer="fromyou-trainer" \
+      description="RunPod Serverless image for ai-toolkit training jobs"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=600 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    NO_ALBUMENTATIONS_UPDATE=1 \
+    DISABLE_TELEMETRY=YES
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    git \
+    curl \
+    build-essential \
+    cmake \
+    wget \
+    python3.10 \
+    python3-pip \
+    python3-dev \
+    python3-setuptools \
+    python3-wheel \
+    python3-venv \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -s /usr/bin/python3 /usr/bin/python && \
+    python -m pip install --upgrade pip
+
+WORKDIR /tmp
+
+COPY requirements.txt /tmp/requirements.txt
+
+# Install torch first to take advantage of Docker layer caching.
+RUN bash -c 'for attempt in 1 2 3; do \
+      if pip install --pre --no-cache-dir --default-timeout=600 --retries 20 torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; then \
+        exit 0; \
+      fi; \
+      echo "PyTorch install failed (attempt ${attempt}). Retrying in 10s..."; \
+      sleep 10; \
+    done; \
+    exit 1'
+
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+WORKDIR /app/ai-toolkit
+
+COPY . /app/ai-toolkit
+
+CMD ["python", "-u", "rp_handler.py"]
+

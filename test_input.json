@@ -1,0 +1,12 @@
+{
+  "input": {
+    "config_file_list": [
+      "config/examples/train_lora_flux_24gb.yaml"
+    ],
+    "name": null,
+    "recover": false,
+    "log": null,
+    "dry_run": true
+  }
+}
+

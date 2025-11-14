@@ -322,6 +322,36 @@ I maintain an official Runpod Pod template here which can be accessed [here](htt
 
 I have also created a short video showing how to get started using AI Toolkit with Runpod [here](https://youtu.be/HBNeS-F6Zz8).
 
+### RunPod Serverless Workers
+
+If you prefer RunPod Serverless endpoints over full pods, the repository now includes a dedicated handler (`rp_handler.py`) and image recipe (`docker/Dockerfile.serverless`). The handler wraps the existing job runner and exposes it through the [`runpod` Python SDK](https://docs.runpod.io/serverless/workers/custom-worker). Quick facts:
+
+- **Local dry-run:** `python rp_handler.py` (uses `test_input.json` and sets `dry_run: true`, so no actual training starts).
+- **Typical request body:**
+  ```json
+  {
+    "input": {
+      "config_file_list": [
+        "/root/ai-toolkit/config/your_config.yaml"
+      ],
+      "name": null,
+      "recover": false,
+      "log": "/root/ai-toolkit/output/train.log"
+    }
+  }
+  ```
+  Add `"dry_run": true` for validation-only requests.
+- **Build & push the container:**
+  ```bash
+  docker build --platform linux/amd64 \
+    -f docker/Dockerfile.serverless \
+    -t <registry>/ai-toolkit-serverless:latest .
+  docker push <registry>/ai-toolkit-serverless:latest
+  ```
+- **Deploy the endpoint:** In the RunPod console create a new **Queue**-type Serverless endpoint that points to the pushed image, choose a GPU with ≥24 GB VRAM, and keep concurrency at 1 for long-running LoRA training. The official docs cover handler behaviour, concurrency, and deployment knobs in detail: [overview](https://docs.runpod.io/serverless/workers/overview), [custom worker tutorial](https://docs.runpod.io/serverless/workers/custom-worker#macos%2Flinux), [handler functions](https://docs.runpod.io/serverless/workers/handler-functions), [concurrent handlers](https://docs.runpod.io/serverless/workers/concurrent-handler), and [deployment guide](https://docs.runpod.io/serverless/workers/deploy).
+
+Once deployed you can submit configs via `/run`, poll `/status`, or script requests with the `runpod` CLI exactly as described in the official documentation.
+
 ## Training in Modal
 
 ### 1. Setup
