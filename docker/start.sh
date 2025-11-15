@@ -12,7 +12,7 @@ trap "echo 'Shutting down...'; kill 0" SIGINT SIGTERM
 
 # Setup ssh
 setup_ssh() {
-    if [[ $PUBLIC_KEY ]]; then
+    if [[ ${PUBLIC_KEY:-} ]]; then
         echo "Setting up SSH..."
         mkdir -p ~/.ssh
         echo "$PUBLIC_KEY" >> ~/.ssh/authorized_keys

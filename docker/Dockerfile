@@ -48,18 +48,13 @@ WORKDIR /app
 # Set aliases for python and pip
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-# install pytorch before cache bust to avoid redownloading pytorch
+# install pytorch before copying code to avoid redownloading pytorch
 RUN pip install --pre --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
 
-# Fix cache busting by moving CACHEBUST to right before git clone
-ARG CACHEBUST=1234
-ARG GIT_COMMIT=main
-RUN echo "Cache bust: ${CACHEBUST}" && \
-    git clone https://github.com/ostris/ai-toolkit.git && \
-    cd ai-toolkit && \
-    git checkout ${GIT_COMMIT}
-
 WORKDIR /app/ai-toolkit
+
+# Copy local ai-toolkit code (includes r2_sync_worker)
+COPY . /app/ai-toolkit/
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt && \
