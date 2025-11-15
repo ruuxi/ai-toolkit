@@ -88,16 +88,12 @@ def _normalize_config_file_list(raw_value: Any) -> List[str]:
     raise ValueError("`config_file_list` must be a string or list of strings.")
 
 
-def _sync_from_r2(dataset_id: str, bucket: str, prefix: str) -> str:
-    """
-    Download dataset from R2 to local storage.
-    Returns the local path where the dataset is stored.
-    """
+def _get_r2_client():
+    """Create and return an S3 client configured for R2."""
     try:
         import boto3
-        from botocore.exceptions import ClientError
     except ImportError:
-        raise RuntimeError("boto3 is required for R2 sync but not installed")
+        raise RuntimeError("boto3 is required for R2 operations but not installed")
 
     endpoint_url = os.environ.get("R2_ENDPOINT")
     access_key = os.environ.get("R2_ACCESS_KEY_ID")
@@ -106,6 +102,25 @@ def _sync_from_r2(dataset_id: str, bucket: str, prefix: str) -> str:
 
     if not endpoint_url or not access_key or not secret_key:
         raise RuntimeError("R2_ENDPOINT, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY must be set")
+
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region,
+    )
+
+
+def _sync_from_r2(dataset_id: str, bucket: str, prefix: str) -> str:
+    """
+    Download dataset from R2 to local storage.
+    Returns the local path where the dataset is stored.
+    """
+    try:
+        from botocore.exceptions import ClientError
+    except ImportError:
+        raise RuntimeError("botocore is required for R2 sync but not installed")
 
     # Create local dataset directory
     local_root = os.environ.get("DATASET_ROOT", "/workspace/datasets")
@@ -121,13 +136,7 @@ def _sync_from_r2(dataset_id: str, bucket: str, prefix: str) -> str:
     print_acc(f"Syncing dataset {dataset_id} from R2 bucket {bucket}, prefix {prefix}")
 
     # Initialize S3 client for R2
-    s3_client = boto3.client(
-        "s3",
-        endpoint_url=endpoint_url,
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name=region,
-    )
+    s3_client = _get_r2_client()
 
     # List and download objects
     try:
@@ -166,6 +175,46 @@ def _sync_from_r2(dataset_id: str, bucket: str, prefix: str) -> str:
 
     except ClientError as e:
         raise RuntimeError(f"R2 sync failed: {e}") from e
+
+
+def _upload_to_r2(local_dir: str, bucket: str, r2_prefix: str) -> List[str]:
+    """
+    Upload all files from a local directory to R2.
+    Returns a list of R2 keys that were uploaded.
+    """
+    try:
+        from botocore.exceptions import ClientError
+    except ImportError:
+        raise RuntimeError("botocore is required for R2 upload but not installed")
+
+    if not os.path.exists(local_dir):
+        print_acc(f"Upload skipped: directory {local_dir} does not exist")
+        return []
+
+    s3_client = _get_r2_client()
+    uploaded_keys = []
+
+    print_acc(f"Uploading outputs from {local_dir} to R2 bucket {bucket}, prefix {r2_prefix}")
+
+    try:
+        # Walk the directory tree and upload all files
+        for root, dirs, files in os.walk(local_dir):
+            for file in files:
+                local_file = os.path.join(root, file)
+                # Compute relative path from local_dir
+                rel_path = os.path.relpath(local_file, local_dir)
+                # Build R2 key
+                r2_key = f"{r2_prefix}/{rel_path}".replace("\\", "/")  # Normalize Windows paths
+
+                print_acc(f"  Uploading {rel_path} -> {r2_key}")
+                s3_client.upload_file(local_file, bucket, r2_key)
+                uploaded_keys.append(r2_key)
+
+        print_acc(f"Uploaded {len(uploaded_keys)} files to R2")
+        return uploaded_keys
+
+    except ClientError as e:
+        raise RuntimeError(f"R2 upload failed: {e}") from e
 
 
 def run_jobs(
@@ -280,6 +329,9 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             # Sync dataset from R2
             local_path = _sync_from_r2(dataset_id, bucket, prefix)
             
+            # Extract job name from config for output path determination
+            job_name = job_config.get("config", {}).get("name", "unknown-job")
+            
             # Update job config with the synced local path
             if "config" in job_config and "process" in job_config["config"]:
                 for process_item in job_config["config"]["process"]:
@@ -317,10 +369,35 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             except:
                 pass
             
+            # Upload outputs to R2 if job completed successfully
+            checkpoint_keys = []
+            sample_keys = []
+            
+            if response.get("jobs_completed", 0) > 0:
+                runpod_job_id = event.get("id", "unknown")
+                output_root = os.environ.get("OUTPUT_ROOT", "/workspace/output")
+                job_output_dir = os.path.join(output_root, job_name)
+                
+                # Upload checkpoints
+                checkpoints_dir = os.path.join(job_output_dir, "checkpoints")
+                if os.path.exists(checkpoints_dir):
+                    r2_checkpoints_prefix = f"models/{dataset_id}/{runpod_job_id}/checkpoints"
+                    checkpoint_keys = _upload_to_r2(checkpoints_dir, bucket, r2_checkpoints_prefix)
+                
+                # Upload samples
+                samples_dir = os.path.join(job_output_dir, "samples")
+                if os.path.exists(samples_dir):
+                    r2_samples_prefix = f"models/{dataset_id}/{runpod_job_id}/samples"
+                    sample_keys = _upload_to_r2(samples_dir, bucket, r2_samples_prefix)
+            
             response["request_id"] = event.get("id")
             response["dataset_synced"] = {
                 "datasetId": dataset_id,
                 "localPath": local_path,
+            }
+            response["r2_outputs"] = {
+                "checkpoints": checkpoint_keys,
+                "samples": sample_keys,
             }
             return response
             
